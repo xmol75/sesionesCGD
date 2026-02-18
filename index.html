@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Gestor de sesiones - Calendario de sesiones para tu servicio">
+    <title>📅 Gestor de Sesiones</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/css/all.min.css">
+    
+    <!-- Firebase SDK v9 (Modular) -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDocs, query, orderBy, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+        
+        // Configuración de Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyDix3BrvWnoxj4KHYXYDbvipvR4Ogn3hiQ",
+            authDomain: "sesionescgd-5507a.firebaseapp.com",
+            projectId: "sesionescgd-5507a",
+            storageBucket: "sesionescgd-5507a.firebasestorage.app",
+            messagingSenderId: "93634870835",
+            appId: "1:93634870835:web:16e95a069b6cae5704ad46",
+            measurementId: "G-XJX86EPC1M"
+        };
+        
+        // Inicializar Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        
+        // Usuarios permitidos
+        const USUARIOS_PERMITIDOS = [
+            'xmolina@ssib.es',
+            'cgdhuse@ssib.es'
+        ];
+        
+        // Hacer disponibles globalmente
+        window.db = db;
+        window.auth = auth;
+        window.USUARIOS_PERMITIDOS = USUARIOS_PERMITIDOS;
+        window.firebaseModules = {
+            collection,
+            addDoc,
+            updateDoc,
+            deleteDoc,
+            doc,
+            getDocs,
+            query,
+            orderBy,
+            serverTimestamp,
+            signInWithEmailAndPassword,
+            onAuthStateChanged,
+            signOut
+        };
+    </script>
+    
+    <style>
+        /* Estilos personalizados adicionales */
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        .sesion-card {
+            transition: all 0.3s ease;
+        }
+        
+        .sesion-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        
+        .sesion-completada {
+            background-color: #F0FDF4;
+            border-left: 4px solid #10B981;
+        }
+        
+        .sesion-pendiente {
+            background-color: #FFFBEB;
+            border-left: 4px solid #F59E0B;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .modal.active {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-content {
+            animation: slideUp 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3B82F6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Scrollbar personalizado */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #F3F4F6;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #9CA3AF;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6B7280;
+        }
+        
+        /* Ocultar/mostrar secciones */
+        .hidden-section {
+            display: none !important;
+        }
+        
+        /* Login screen */
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    
+    <!-- Pantalla de Login -->
+    <div id="pantallaLogin" class="login-container">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4">
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full mb-4">
+                    <i class="fas fa-calendar-alt text-white text-2xl"></i>
+                </div>
+                <h1 class="text-3xl font-bold text-gray-800 mb-2">Gestor de Sesiones</h1>
+                <p class="text-gray-600">Inicia sesión para continuar</p>
+            </div>
+            
+            <form id="formLogin" onsubmit="iniciarSesion(event)">
+                <!-- Email -->
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">
+                        <i class="fas fa-envelope text-blue-600"></i>
+                        Correo Electrónico
+                    </label>
+                    <input 
+                        type="email" 
+                        id="inputEmail" 
+                        required 
+                        placeholder="usuario@ssib.es"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                </div>
+                
+                <!-- Password -->
+                <div class="mb-6">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">
+                        <i class="fas fa-lock text-blue-600"></i>
+                        Contraseña
+                    </label>
+                    <input 
+                        type="password" 
+                        id="inputPassword" 
+                        required 
+                        placeholder="••••••••"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                </div>
+                
+                <!-- Error Message -->
+                <div id="errorLogin" class="hidden mb-4 p-3 bg-red-50 border-l-4 border-red-500 rounded">
+                    <p class="text-red-700 text-sm flex items-center gap-2">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <span id="mensajeErrorLogin"></span>
+                    </p>
+                </div>
+                
+                <!-- Submit Button -->
+                <button 
+                    type="submit" 
+                    id="btnLogin"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-300 flex items-center justify-center gap-2"
+                >
+                    <i class="fas fa-sign-in-alt"></i>
+                    Iniciar Sesión
+                </button>
+            </form>
+            
+            <div class="mt-6 pt-6 border-t border-gray-200">
+                <p class="text-xs text-gray-500 text-center">
+                    <i class="fas fa-info-circle"></i>
+                    Acceso restringido a usuarios autorizados
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Aplicación Principal (oculta hasta login) -->
+    <div id="appPrincipal" class="hidden-section">
+        
+        <!-- Header -->
+        <header class="bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg">
+            <div class="container mx-auto px-4 py-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h1 class="text-3xl font-bold flex items-center gap-3">
+                            <i class="fas fa-calendar-alt"></i>
+                            Gestor de Sesiones
+                        </h1>
+                        <p class="mt-2 text-blue-100">
+                            <i class="fas fa-user"></i>
+                            <span id="usuarioActual"></span>
+                        </p>
+                    </div>
+                    <button 
+                        onclick="cerrarSesion()" 
+                        class="bg-blue-800 hover:bg-blue-900 text-white font-semibold py-2 px-4 rounded-lg transition duration-300 flex items-center gap-2"
+                    >
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span class="hidden md:inline">Cerrar Sesión</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Main Content -->
+        <main class="container mx-auto px-4 py-8 max-w-4xl">
+            
+            <!-- Botón Nueva Sesión -->
+            <div class="mb-6">
+                <button onclick="abrirModal()" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-300 flex items-center justify-center gap-2">
+                    <i class="fas fa-plus-circle"></i>
+                    Nueva Sesión
+                </button>
+            </div>
+            
+            <!-- Filtros -->
+            <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                    <i class="fas fa-filter"></i>
+                    Filtros
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Filtro Año -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Año</label>
+                        <select id="filtroAno" onchange="aplicarFiltros()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="todos">Todos los años</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Filtro Estado -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Estado</label>
+                        <select id="filtroEstado" onchange="aplicarFiltros()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="todas">Todas</option>
+                            <option value="pendientes">Pendientes</option>
+                            <option value="hechas">Hechas</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Filtro Orden -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Orden por fecha</label>
+                        <select id="filtroOrden" onchange="aplicarFiltros()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="asc">Ascendente (Antiguas → Recientes)</option>
+                            <option value="desc">Descendente (Recientes → Antiguas)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Loader -->
+            <div id="loader" class="flex justify-center items-center py-12">
+                <div class="loader"></div>
+            </div>
+            
+            <!-- Lista de Sesiones -->
+            <div id="listaSesiones" class="space-y-4">
+                <!-- Las sesiones se cargarán aquí dinámicamente -->
+            </div>
+            
+            <!-- Mensaje cuando no hay sesiones -->
+            <div id="mensajeVacio" class="hidden bg-white rounded-lg shadow-md p-12 text-center">
+                <i class="fas fa-calendar-times text-gray-300 text-6xl mb-4"></i>
+                <h3 class="text-xl font-semibold text-gray-600 mb-2">No hay sesiones</h3>
+                <p class="text-gray-500">Crea tu primera sesión haciendo clic en el botón "Nueva Sesión"</p>
+            </div>
+            
+        </main>
+        
+    </div>
+    
+    <!-- Modal Añadir/Editar Sesión -->
+    <div id="modalSesion" class="modal">
+        <div class="modal-content bg-white rounded-lg shadow-2xl p-6 w-full max-w-md mx-4">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="modalTitulo" class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <i class="fas fa-plus-circle text-blue-600"></i>
+                    Nueva Sesión
+                </h2>
+                <button onclick="cerrarModal()" class="text-gray-400 hover:text-gray-600 text-2xl">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <form id="formSesion" onsubmit="guardarSesion(event)">
+                <!-- Fecha -->
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">
+                        <i class="fas fa-calendar text-blue-600"></i>
+                        Fecha
+                    </label>
+                    <input type="date" id="inputFecha" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                
+                <!-- Unidad -->
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">
+                        <i class="fas fa-book text-blue-600"></i>
+                        Unidad
+                    </label>
+                    <input type="text" id="inputUnidad" required placeholder="Ej: Unidad 3" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                
+                <!-- Responsable -->
+                <div class="mb-6">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">
+                        <i class="fas fa-user text-blue-600"></i>
+                        Responsable
+                    </label>
+                    <input type="text" id="inputResponsable" required placeholder="Ej: Juan Pérez" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                
+                <!-- Botones -->
+                <div class="flex gap-3">
+                    <button type="button" onclick="cerrarModal()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-3 px-4 rounded-lg transition duration-300">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-300">
+                        Guardar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Modal de Confirmación -->
+    <div id="modalConfirmacion" class="modal">
+        <div class="modal-content bg-white rounded-lg shadow-2xl p-6 w-full max-w-sm mx-4">
+            <div class="text-center mb-6">
+                <i class="fas fa-exclamation-circle text-red-500 text-5xl mb-4"></i>
+                <h3 class="text-xl font-bold text-gray-800 mb-2">¿Eliminar sesión?</h3>
+                <p class="text-gray-600">Esta acción no se puede deshacer</p>
+            </div>
+            
+            <div class="flex gap-3">
+                <button onclick="cerrarModalConfirmacion()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-3 px-4 rounded-lg transition duration-300">
+                    Cancelar
+                </button>
+                <button onclick="confirmarEliminar()" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-300">
+                    Eliminar
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notificaciones -->
+    <div id="toast" class="fixed bottom-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg hidden transition-all duration-300 z-50">
+        <span id="toastMensaje"></span>
+    </div>
+    
+    <script>
+        // Variables globales
+        let sesionesData = [];
+        let sesionIdEditar = null;
+        let sesionIdEliminar = null;
+        let usuarioActual = null;
+        
+        // Verificar estado de autenticación al cargar
+        window.addEventListener('load', () => {
+            const { onAuthStateChanged } = window.firebaseModules;
+            
+            onAuthStateChanged(window.auth, (user) => {
+                if (user) {
+                    // Usuario autenticado
+                    if (window.USUARIOS_PERMITIDOS.includes(user.email)) {
+                        usuarioActual = user;
+                        mostrarAppPrincipal();
+                        cargarSesiones();
+                    } else {
+                        // Usuario no autorizado
+                        mostrarError('Usuario no autorizado para acceder a esta aplicación');
+                        cerrarSesion();
+                    }
+                } else {
+                    // No hay usuario autenticado
+                    mostrarPantallaLogin();
+                }
+            });
+        });
+        
+        // Mostrar pantalla de login
+        function mostrarPantallaLogin() {
+            document.getElementById('pantallaLogin').classList.remove('hidden-section');
+            document.getElementById('appPrincipal').classList.add('hidden-section');
+        }
+        
+        // Mostrar aplicación principal
+        function mostrarAppPrincipal() {
+            document.getElementById('pantallaLogin').classList.add('hidden-section');
+            document.getElementById('appPrincipal').classList.remove('hidden-section');
+            
+            if (usuarioActual) {
+                document.getElementById('usuarioActual').textContent = usuarioActual.email;
+            }
+        }
+        
+        // Iniciar sesión
+        async function iniciarSesion(event) {
+            event.preventDefault();
+            
+            const email = document.getElementById('inputEmail').value.trim();
+            const password = document.getElementById('inputPassword').value;
+            const btnLogin = document.getElementById('btnLogin');
+            const errorDiv = document.getElementById('errorLogin');
+            
+            // Verificar si el usuario está en la lista permitida
+            if (!window.USUARIOS_PERMITIDOS.includes(email)) {
+                mostrarErrorLogin('Este usuario no tiene acceso autorizado');
+                return;
+            }
+            
+            // Deshabilitar botón
+            btnLogin.disabled = true;
+            btnLogin.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Iniciando sesión...';
+            errorDiv.classList.add('hidden');
+            
+            try {
+                const { signInWithEmailAndPassword } = window.firebaseModules;
+                await signInWithEmailAndPassword(window.auth, email, password);
+                
+                // El onAuthStateChanged se encargará de mostrar la app
+                
+            } catch (error) {
+                console.error('Error al iniciar sesión:', error);
+                
+                let mensaje = 'Error al iniciar sesión';
+                
+                switch (error.code) {
+                    case 'auth/invalid-email':
+                        mensaje = 'Correo electrónico inválido';
+                        break;
+                    case 'auth/user-disabled':
+                        mensaje = 'Usuario deshabilitado';
+                        break;
+                    case 'auth/user-not-found':
+                        mensaje = 'Usuario no encontrado. Contacta al administrador.';
+                        break;
+                    case 'auth/wrong-password':
+                        mensaje = 'Contraseña incorrecta';
+                        break;
+                    case 'auth/invalid-credential':
+                        mensaje = 'Credenciales inválidas. Verifica tu email y contraseña.';
+                        break;
+                    case 'auth/too-many-requests':
+                        mensaje = 'Demasiados intentos fallidos. Intenta más tarde.';
+                        break;
+                    default:
+                        mensaje = error.message;
+                }
+                
+                mostrarErrorLogin(mensaje);
+                
+                // Rehabilitar botón
+                btnLogin.disabled = false;
+                btnLogin.innerHTML = '<i class="fas fa-sign-in-alt"></i> Iniciar Sesión';
+            }
+        }
+        
+        // Mostrar error en login
+        function mostrarErrorLogin(mensaje) {
+            const errorDiv = document.getElementById('errorLogin');
+            const mensajeSpan = document.getElementById('mensajeErrorLogin');
+            
+            mensajeSpan.textContent = mensaje;
+            errorDiv.classList.remove('hidden');
+            
+            // Auto-ocultar después de 5 segundos
+            setTimeout(() => {
+                errorDiv.classList.add('hidden');
+            }, 5000);
+        }
+        
+        // Cerrar sesión
+        async function cerrarSesion() {
+            try {
+                const { signOut } = window.firebaseModules;
+                await signOut(window.auth);
+                
+                // Limpiar datos
+                sesionesData = [];
+                usuarioActual = null;
+                
+                // Resetear formulario de login
+                document.getElementById('formLogin').reset();
+                
+                // Mostrar login
+                mostrarPantallaLogin();
+                
+            } catch (error) {
+                console.error('Error al cerrar sesión:', error);
+                mostrarToast('Error al cerrar sesión', 'error');
+            }
+        }
+        
+        // Cargar todas las sesiones desde Firebase
+        async function cargarSesiones() {
+            try {
+                document.getElementById('loader').style.display = 'flex';
+                document.getElementById('listaSesiones').innerHTML = '';
+                document.getElementById('mensajeVacio').classList.add('hidden');
+                
+                const { collection, getDocs, query, orderBy } = window.firebaseModules;
+                const sesionesRef = collection(window.db, 'sesiones');
+                const q = query(sesionesRef, orderBy('fecha', 'asc'));
+                const querySnapshot = await getDocs(q);
+                
+                sesionesData = [];
+                querySnapshot.forEach((doc) => {
+                    sesionesData.push({
+                        id: doc.id,
+                        ...doc.data()
+                    });
+                });
+                
+                // Actualizar filtro de años
+                actualizarFiltroAnos();
+                
+                // Aplicar filtros
+                aplicarFiltros();
+                
+                document.getElementById('loader').style.display = 'none';
+                
+            } catch (error) {
+                console.error('Error al cargar sesiones:', error);
+                document.getElementById('loader').style.display = 'none';
+                mostrarToast('Error al cargar las sesiones', 'error');
+            }
+        }
+        
+        // Actualizar opciones del filtro de años
+        function actualizarFiltroAnos() {
+            const anos = new Set();
+            sesionesData.forEach(sesion => {
+                if (sesion.fecha) {
+                    const ano = new Date(sesion.fecha).getFullYear();
+                    anos.add(ano);
+                }
+            });
+            
+            const filtroAno = document.getElementById('filtroAno');
+            const anoActual = filtroAno.value;
+            
+            filtroAno.innerHTML = '<option value="todos">Todos los años</option>';
+            
+            Array.from(anos).sort((a, b) => b - a).forEach(ano => {
+                const option = document.createElement('option');
+                option.value = ano;
+                option.textContent = ano;
+                filtroAno.appendChild(option);
+            });
+            
+            // Restaurar selección previa si existe
+            if (anoActual && Array.from(anos).includes(parseInt(anoActual))) {
+                filtroAno.value = anoActual;
+            }
+        }
+        
+        // Aplicar filtros
+        function aplicarFiltros() {
+            const filtroAno = document.getElementById('filtroAno').value;
+            const filtroEstado = document.getElementById('filtroEstado').value;
+            const filtroOrden = document.getElementById('filtroOrden').value;
+            
+            let sesionesFiltradas = [...sesionesData];
+            
+            // Filtrar por año
+            if (filtroAno !== 'todos') {
+                sesionesFiltradas = sesionesFiltradas.filter(sesion => {
+                    const ano = new Date(sesion.fecha).getFullYear();
+                    return ano === parseInt(filtroAno);
+                });
+            }
+            
+            // Filtrar por estado
+            if (filtroEstado === 'pendientes') {
+                sesionesFiltradas = sesionesFiltradas.filter(sesion => !sesion.completada);
+            } else if (filtroEstado === 'hechas') {
+                sesionesFiltradas = sesionesFiltradas.filter(sesion => sesion.completada);
+            }
+            
+            // Ordenar por fecha
+            sesionesFiltradas.sort((a, b) => {
+                const fechaA = new Date(a.fecha);
+                const fechaB = new Date(b.fecha);
+                return filtroOrden === 'asc' ? fechaA - fechaB : fechaB - fechaA;
+            });
+            
+            // Renderizar
+            renderizarSesiones(sesionesFiltradas);
+        }
+        
+        // Renderizar sesiones en el DOM
+        function renderizarSesiones(sesiones) {
+            const listaSesiones = document.getElementById('listaSesiones');
+            const mensajeVacio = document.getElementById('mensajeVacio');
+            
+            if (sesiones.length === 0) {
+                listaSesiones.innerHTML = '';
+                mensajeVacio.classList.remove('hidden');
+                return;
+            }
+            
+            mensajeVacio.classList.add('hidden');
+            listaSesiones.innerHTML = sesiones.map(sesion => {
+                const fecha = new Date(sesion.fecha + 'T00:00:00');
+                const fechaFormateada = fecha.toLocaleDateString('es-ES', {
+                    weekday: 'short',
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                });
+                
+                const claseEstado = sesion.completada ? 'sesion-completada' : 'sesion-pendiente';
+                const iconoEstado = sesion.completada ? 
+                    '<i class="fas fa-check-circle text-green-500 text-xl"></i>' : 
+                    '<i class="fas fa-clock text-amber-500 text-xl"></i>';
+                
+                return `
+                    <div class="sesion-card ${claseEstado} bg-white rounded-lg shadow-md p-5">
+                        <div class="flex justify-between items-start mb-3">
+                            <div class="flex items-center gap-2">
+                                ${iconoEstado}
+                                <span class="text-sm font-semibold ${sesion.completada ? 'text-green-700' : 'text-amber-700'}">
+                                    ${sesion.completada ? 'Completada' : 'Pendiente'}
+                                </span>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="toggleCompletada('${sesion.id}', ${!sesion.completada})" 
+                                    class="text-blue-600 hover:text-blue-700 p-2" 
+                                    title="${sesion.completada ? 'Marcar como pendiente' : 'Marcar como completada'}">
+                                    <i class="fas ${sesion.completada ? 'fa-undo' : 'fa-check'}"></i>
+                                </button>
+                                <button onclick="editarSesion('${sesion.id}')" 
+                                    class="text-amber-600 hover:text-amber-700 p-2" 
+                                    title="Editar">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button onclick="abrirModalEliminar('${sesion.id}')" 
+                                    class="text-red-600 hover:text-red-700 p-2" 
+                                    title="Eliminar">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-2 text-gray-700">
+                                <i class="fas fa-calendar text-blue-600 w-5"></i>
+                                <span class="font-semibold">${fechaFormateada}</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-gray-700">
+                                <i class="fas fa-book text-blue-600 w-5"></i>
+                                <span>${sesion.unidad}</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-gray-700">
+                                <i class="fas fa-user text-blue-600 w-5"></i>
+                                <span>${sesion.responsable}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Abrir modal para nueva sesión
+        function abrirModal() {
+            sesionIdEditar = null;
+            document.getElementById('modalTitulo').innerHTML = '<i class="fas fa-plus-circle text-blue-600"></i> Nueva Sesión';
+            document.getElementById('formSesion').reset();
+            
+            // Poner fecha de hoy por defecto
+            const hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('inputFecha').value = hoy;
+            
+            document.getElementById('modalSesion').classList.add('active');
+        }
+        
+        // Cerrar modal
+        function cerrarModal() {
+            document.getElementById('modalSesion').classList.remove('active');
+            document.getElementById('formSesion').reset();
+            sesionIdEditar = null;
+        }
+        
+        // Guardar sesión (crear o actualizar)
+        async function guardarSesion(event) {
+            event.preventDefault();
+            
+            const fecha = document.getElementById('inputFecha').value;
+            const unidad = document.getElementById('inputUnidad').value.trim();
+            const responsable = document.getElementById('inputResponsable').value.trim();
+            
+            if (!fecha || !unidad || !responsable) {
+                mostrarToast('Por favor, completa todos los campos', 'error');
+                return;
+            }
+            
+            try {
+                const { collection, addDoc, updateDoc, doc, serverTimestamp } = window.firebaseModules;
+                
+                if (sesionIdEditar) {
+                    // Actualizar sesión existente
+                    const sesionRef = doc(window.db, 'sesiones', sesionIdEditar);
+                    await updateDoc(sesionRef, {
+                        fecha,
+                        unidad,
+                        responsable,
+                        updatedAt: serverTimestamp()
+                    });
+                    mostrarToast('Sesión actualizada correctamente', 'success');
+                } else {
+                    // Crear nueva sesión
+                    await addDoc(collection(window.db, 'sesiones'), {
+                        fecha,
+                        unidad,
+                        responsable,
+                        completada: false,
+                        createdAt: serverTimestamp(),
+                        updatedAt: serverTimestamp()
+                    });
+                    mostrarToast('Sesión creada correctamente', 'success');
+                }
+                
+                cerrarModal();
+                cargarSesiones();
+                
+            } catch (error) {
+                console.error('Error al guardar sesión:', error);
+                mostrarToast('Error al guardar la sesión', 'error');
+            }
+        }
+        
+        // Editar sesión
+        function editarSesion(id) {
+            const sesion = sesionesData.find(s => s.id === id);
+            if (!sesion) return;
+            
+            sesionIdEditar = id;
+            document.getElementById('modalTitulo').innerHTML = '<i class="fas fa-edit text-amber-600"></i> Editar Sesión';
+            document.getElementById('inputFecha').value = sesion.fecha;
+            document.getElementById('inputUnidad').value = sesion.unidad;
+            document.getElementById('inputResponsable').value = sesion.responsable;
+            
+            document.getElementById('modalSesion').classList.add('active');
+        }
+        
+        // Toggle estado completada
+        async function toggleCompletada(id, nuevoEstado) {
+            try {
+                const { updateDoc, doc, serverTimestamp } = window.firebaseModules;
+                const sesionRef = doc(window.db, 'sesiones', id);
+                
+                await updateDoc(sesionRef, {
+                    completada: nuevoEstado,
+                    updatedAt: serverTimestamp()
+                });
+                
+                mostrarToast(nuevoEstado ? 'Sesión marcada como completada' : 'Sesión marcada como pendiente', 'success');
+                cargarSesiones();
+                
+            } catch (error) {
+                console.error('Error al actualizar estado:', error);
+                mostrarToast('Error al actualizar el estado', 'error');
+            }
+        }
+        
+        // Abrir modal de confirmación para eliminar
+        function abrirModalEliminar(id) {
+            sesionIdEliminar = id;
+            document.getElementById('modalConfirmacion').classList.add('active');
+        }
+        
+        // Cerrar modal de confirmación
+        function cerrarModalConfirmacion() {
+            document.getElementById('modalConfirmacion').classList.remove('active');
+            sesionIdEliminar = null;
+        }
+        
+        // Confirmar eliminación
+        async function confirmarEliminar() {
+            if (!sesionIdEliminar) return;
+            
+            try {
+                const { deleteDoc, doc } = window.firebaseModules;
+                await deleteDoc(doc(window.db, 'sesiones', sesionIdEliminar));
+                
+                mostrarToast('Sesión eliminada correctamente', 'success');
+                cerrarModalConfirmacion();
+                cargarSesiones();
+                
+            } catch (error) {
+                console.error('Error al eliminar sesión:', error);
+                mostrarToast('Error al eliminar la sesión', 'error');
+            }
+        }
+        
+        // Mostrar notificación toast
+        function mostrarToast(mensaje, tipo = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMensaje = document.getElementById('toastMensaje');
+            
+            toastMensaje.textContent = mensaje;
+            
+            // Colores según tipo
+            if (tipo === 'success') {
+                toast.className = 'fixed bottom-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg transition-all duration-300 z-50';
+            } else if (tipo === 'error') {
+                toast.className = 'fixed bottom-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg transition-all duration-300 z-50';
+            }
+            
+            toast.classList.remove('hidden');
+            
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+        
+        // Cerrar modales al hacer clic fuera
+        document.getElementById('modalSesion').addEventListener('click', function(e) {
+            if (e.target === this) {
+                cerrarModal();
+            }
+        });
+        
+        document.getElementById('modalConfirmacion').addEventListener('click', function(e) {
+            if (e.target === this) {
+                cerrarModalConfirmacion();
+            }
+        });
+    </script>
+</body>
+</html>
